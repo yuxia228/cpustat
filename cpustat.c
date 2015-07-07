@@ -203,6 +203,7 @@ void monitor_each_cpu(void)
 			last_cpu_stat = accum_cpu_stat;
 			accum_cpu_stat = INITIAL_CPU_STAT;
 		}
+		fflush(stdout);
 		nanosleep(&nanosleep_ts, NULL);
 	}
 }
@@ -236,6 +237,7 @@ void monitor(void)
 		fclose(fp);
 		show_cpu_rate(&last_cpu_stat, &cpu);
 		last_cpu_stat = cpu;
+		fflush(stdout);
 		nanosleep(&nanosleep_ts, NULL);
 	}
 }
