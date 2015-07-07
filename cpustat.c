@@ -6,6 +6,8 @@
 #include <sys/time.h>
 
 struct timespec nanosleep_ts = { 1, 0 };
+unsigned long long cpumask = 0;
+int flag_accumulation = 0;
 
 struct cpu_stat {
 	unsigned long user;
@@ -17,11 +19,21 @@ struct cpu_stat {
 	unsigned long softirq;
 };
 
+const struct cpu_stat INITIAL_CPU_STAT = {0};
 struct cpu_stat last_cpu_stat = {0};
+struct cpu_stat accum_cpu_stat = {0};
+struct cpu_stat last_each_cpu_stat[64] = {{0}};
+
+const char STAT_HEADER[] = "date       time            user% nice%  sys% idle%";
 
 void usage(int argc, char * const argv[])
 {
-	fprintf(stderr, "Usage:\n  %s [OPTION]...\n", argv[0]);	
+	fprintf(stderr, "Usage:\n  %s [OPTION]...\n\n", argv[0]);
+	fprintf(stderr, "Options:\n");
+	fprintf(stderr, "  -d, --delay=SEC      delay-time interval\n");
+	fprintf(stderr, "  -c, --cpumask=MASK   specify cpu-mask\n");
+	fprintf(stderr, "  -a, --accumulation   accumulate each cpus if cpu-mask is specified\n");
+	fprintf(stderr, "  -h, --help           display this help\n");
 	exit(-1);
 }
 
@@ -35,16 +47,29 @@ int parse_opt(int argc, char * const argv[])
 		int option_index = 0;
 		static const struct option long_options[] = {
 			{"delay",	required_argument, 0,  0 },
+			{"cpumask",	required_argument, 0,  0 },
+			{"accumulation", no_argument,  0,  0 },
 			{"help",	no_argument,	   0,  0 },
 			{0,			0,				   0,  0 }
 		};
 
-		c = getopt_long(argc, argv, "d:h",
+		c = getopt_long(argc, argv, "c:d:ah",
 				 long_options, &option_index);
 		if (c == -1)
 			break;
 
 		switch (c) {
+		case 'a':
+			flag_accumulation = 1;
+			break;
+		case 'c':
+			cpumask = strtoull(optarg, NULL, 16);
+			if ( 0 == cpumask )
+			{
+				fprintf(stderr, "cpumask should not be zero.\n");
+				usage(argc, argv);
+			}
+			break;
 		case 'd':
 			nanosleep_ts.tv_sec = (time_t)strtoul(optarg,&endptr,10);
 			if( endptr )
@@ -63,7 +88,19 @@ int parse_opt(int argc, char * const argv[])
 	return 0;
 }
 
-void show_cpu_rate(struct cpu_stat *last, struct cpu_stat *current)
+void accumulate_cpu_stat( struct cpu_stat * const accum, const struct cpu_stat * const current )
+{
+	accum->user += current->user;
+	accum->nice += current->nice;
+	accum->sys += current->sys;
+	accum->idle += current->idle;
+	accum->iowait += current->iowait;
+	accum->irq += current->irq;
+	accum->softirq += current->softirq;
+	return;
+}
+
+void show_cpu_rate( const struct cpu_stat * const last, const struct cpu_stat * const current)
 {
 	unsigned long total;
 	struct timeval tv;
@@ -99,12 +136,84 @@ void show_cpu_rate(struct cpu_stat *last, struct cpu_stat *current)
 	return;
 }
 
+void monitor_each_cpu(void)
+{
+	FILE *fp;
+	struct cpu_stat cpu;
+	int n;
+	unsigned int maxbit=0;
+	unsigned long long b, cpuno;
+	char buf[1024];
+
+	for(b = cpumask ; b!=0 ; b>>=1, maxbit++);
+
+	if ( !flag_accumulation ) printf("cpu# ");
+	printf("%s\n", STAT_HEADER);
+	for(;;)
+	{
+		fp = fopen("/proc/stat", "r" );
+		if ( NULL == fp ) {
+			perror("fopen");
+			break;
+		}
+
+		/* skip first line */
+		if ( NULL == fgets(buf, sizeof(buf), fp) )
+		{
+			perror("fgets");
+			break;
+		}
+		for(b=0 ; b<maxbit ; b++)
+		{
+			if ( NULL == fgets(buf, sizeof(buf), fp) )
+			{
+				perror("fgets");
+				break;
+			}
+			if( !(cpumask & (1ULL<<b)) ) continue;
+			n = sscanf(buf, "cpu%llu  %ld %ld %ld %ld %ld %ld %ld",
+				&cpuno, &cpu.user, &cpu.nice, &cpu.sys, &cpu.idle,
+				&cpu.iowait, &cpu.irq, &cpu.softirq );
+			if ( errno )
+			{
+				perror("sscanf");
+				break;
+			}
+			if ( n != 8 )
+			{
+				fprintf(stderr, "parse error (%d)\n",n);
+				break;
+			}
+			if ( cpuno != b )
+			{
+				fprintf(stderr, "number error ? (line:%llu cpu%llu)\n", b+1, cpuno);
+			}
+
+			if ( flag_accumulation ) {
+				accumulate_cpu_stat( &accum_cpu_stat, &cpu);
+			} else {
+				printf("cpu%llu ",b);
+				show_cpu_rate(&last_each_cpu_stat[b], &cpu);
+				last_each_cpu_stat[b] = cpu;
+			}
+		}
+		fclose(fp);
+		if ( flag_accumulation ) {
+			show_cpu_rate(&last_cpu_stat, &accum_cpu_stat);
+			last_cpu_stat = accum_cpu_stat;
+			accum_cpu_stat = INITIAL_CPU_STAT;
+		}
+		nanosleep(&nanosleep_ts, NULL);
+	}
+}
+
 void monitor(void)
 {
 	FILE *fp;
 	struct cpu_stat cpu;
 	int n;
-	printf("date time user nice sys idle\n");
+
+	printf("%s\n", STAT_HEADER);
 	for(;;)
 	{
 		fp = fopen("/proc/stat", "r" );
@@ -121,7 +230,7 @@ void monitor(void)
 		}
 		if ( n != 7 )
 		{
-			fprintf(stderr, "fscanf match error (%d)\n",n);
+			fprintf(stderr, "parse error (%d)\n",n);
 			break;
 		}
 		fclose(fp);
@@ -134,8 +243,13 @@ void monitor(void)
 int main(int argc, char * const argv[])
 {
 	parse_opt(argc, argv);
+	if( cpumask ) printf("cpumask = %llx\n", cpumask);
 	printf("delay = %ld.%09ld sec\n", (long)nanosleep_ts.tv_sec, nanosleep_ts.tv_nsec);
-	monitor();
+	if( cpumask ) {
+		monitor_each_cpu();
+	} else {
+		monitor();
+	}
 	return 0;
 }
 
