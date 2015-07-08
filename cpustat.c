@@ -174,7 +174,7 @@ void monitor_each_cpu(void)
 			n = sscanf(buf, "cpu%llu  %ld %ld %ld %ld %ld %ld %ld",
 				&cpuno, &cpu.user, &cpu.nice, &cpu.sys, &cpu.idle,
 				&cpu.iowait, &cpu.irq, &cpu.softirq );
-			if ( errno )
+			if ( EOF == n )
 			{
 				perror("sscanf");
 				break;
@@ -224,7 +224,7 @@ void monitor(void)
 		}
 		n = fscanf(fp, "cpu  %ld %ld %ld %ld %ld %ld %ld",
 			&cpu.user, &cpu.nice, &cpu.sys, &cpu.idle, &cpu.iowait, &cpu.irq, &cpu.softirq );
-		if ( errno )
+		if ( EOF == n )
 		{
 			perror("fscanf");
 			break;
