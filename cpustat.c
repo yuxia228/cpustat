@@ -8,6 +8,8 @@
 struct timespec nanosleep_ts = { 1, 0 };
 unsigned long long cpumask = 0;
 int flag_accumulation = 0;
+int flag_tick = 0;
+int flag_wide = 0;
 
 struct cpu_stat {
 	unsigned long user;
@@ -24,7 +26,10 @@ struct cpu_stat last_cpu_stat = {0};
 struct cpu_stat accum_cpu_stat = {0};
 struct cpu_stat last_each_cpu_stat[64] = {{0}};
 
-const char STAT_HEADER[] = "date       time            user% nice%  sys% idle%";
+const char STR_STAT_HEADER_TIMESTAMP[] = "date       time           ";
+const char STR_STAT_HEADER[] = "user% nice%  sys% idle%";
+const char STR_STAT_HEADER_WIDE[] = "iowait% irq% softirq%";
+const char STR_STAT_HEADER_TICK[] = "user nice sys idle iowait irq softirq total";
 
 void usage(int argc, char * const argv[])
 {
@@ -33,6 +38,8 @@ void usage(int argc, char * const argv[])
 	fprintf(stderr, "  -d, --delay=SEC      delay-time interval\n");
 	fprintf(stderr, "  -c, --cpumask=MASK   specify cpu-mask\n");
 	fprintf(stderr, "  -a, --accumulation   accumulate each cpus if cpu-mask is specified\n");
+	fprintf(stderr, "  -w, --wide           show cpu rate of iowait, irq and softirq\n");
+	fprintf(stderr, "  -t, --tick           show tick instead of cpu rate\n");
 	fprintf(stderr, "  -h, --help           display this help\n");
 	exit(-1);
 }
@@ -46,14 +53,16 @@ int parse_opt(int argc, char * const argv[])
 	while (1) {
 		int option_index = 0;
 		static const struct option long_options[] = {
-			{"delay",	required_argument, 0,  0 },
-			{"cpumask",	required_argument, 0,  0 },
-			{"accumulation", no_argument,  0,  0 },
-			{"help",	no_argument,	   0,  0 },
+			{"delay",	required_argument, 0,  'd' },
+			{"cpumask",	required_argument, 0,  'c' },
+			{"accumulation", no_argument,  0,  'a' },
+			{"wide",	no_argument,	   0,  'w' },
+			{"tick",	no_argument,	   0,  't' },
+			{"help",	no_argument,	   0,  'h' },
 			{0,			0,				   0,  0 }
 		};
 
-		c = getopt_long(argc, argv, "c:d:ah",
+		c = getopt_long(argc, argv, "c:d:awth",
 				 long_options, &option_index);
 		if (c == -1)
 			break;
@@ -79,6 +88,12 @@ int parse_opt(int argc, char * const argv[])
 				nanosleep_ts.tv_nsec = nsec;
 			}
 			break;
+		case 'w':
+			flag_wide = 1;
+			break;
+		case 't':
+			flag_tick = 1;
+			break;
 		case 'h':
 		case '?':
 		default:
@@ -100,17 +115,23 @@ void accumulate_cpu_stat( struct cpu_stat * const accum, const struct cpu_stat *
 	return;
 }
 
-void show_cpu_rate( const struct cpu_stat * const last, const struct cpu_stat * const current)
+void show_timestamp(void)
 {
-	unsigned long total;
 	struct timeval tv;
 	struct tm tm;
 
 	gettimeofday(&tv, NULL);
 	localtime_r(&tv.tv_sec, &tm);
-	printf("%04d/%02d/%02d %02d:%02d:%02d.%06d ",
+	printf("%04d/%02d/%02d %02d:%02d:%02d.%06d",
 		tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday,
 		tm.tm_hour, tm.tm_min, tm.tm_sec, (int)tv.tv_usec);
+	return;
+}
+void show_cpu_rate( const struct cpu_stat * const last, const struct cpu_stat * const current)
+{
+	unsigned long total;
+
+	show_timestamp();
 
 	total = current->user - last->user +
 		current->nice - last->nice +
@@ -124,15 +145,58 @@ void show_cpu_rate( const struct cpu_stat * const last, const struct cpu_stat * 
 		printf("- - - -\n");
 		return;
 	}
-	printf("%ld.%02ld%% %ld.%02ld%% %ld.%02ld%% %ld.%02ld%%\n",
-		(((current->user - last->user)*10000)/total)/100,
-		(((current->user - last->user)*10000)/total)%100,
-		(((current->nice - last->nice)*10000)/total)/100,
-		(((current->nice - last->nice)*10000)/total)%100,
-		(((current->sys - last->sys)*10000)/total)/100,
-		(((current->sys - last->sys)*10000)/total)%100,
-		(((current->idle - last->idle)*10000)/total)/100,
-		(((current->idle - last->idle)*10000)/total)%100);
+	if ( !flag_tick )
+	{
+		printf(" %ld.%02ld%% %ld.%02ld%% %ld.%02ld%% %ld.%02ld%%",
+			(((current->user - last->user)*10000)/total)/100,
+			(((current->user - last->user)*10000)/total)%100,
+			(((current->nice - last->nice)*10000)/total)/100,
+			(((current->nice - last->nice)*10000)/total)%100,
+			(((current->sys - last->sys)*10000)/total)/100,
+			(((current->sys - last->sys)*10000)/total)%100,
+			(((current->idle - last->idle)*10000)/total)/100,
+			(((current->idle - last->idle)*10000)/total)%100);
+		if( flag_wide )
+		{
+			printf(" %ld.%02ld%% %ld.%02ld%% %ld.%02ld%%",
+				(((current->iowait - last->iowait)*10000)/total)/100,
+				(((current->iowait - last->iowait)*10000)/total)%100,
+				(((current->irq - last->irq)*10000)/total)/100,
+				(((current->irq - last->irq)*10000)/total)%100,
+				(((current->softirq - last->softirq)*10000)/total)/100,
+				(((current->softirq - last->softirq)*10000)/total)%100);
+		}
+	}
+	else
+	{
+		printf(" %ld %ld %ld %ld %ld %ld %ld %ld",
+			current->user - last->user,
+			current->nice - last->nice,
+			current->sys - last->sys,
+			current->idle - last->idle,
+			current->iowait - last->iowait,
+			current->irq - last->irq,
+			current->softirq - last->softirq,
+			total);
+	}
+	printf("\n");
+	return;
+}
+
+void show_header(void)
+{
+	if ( cpumask && !flag_accumulation ) printf("cpu# ");
+	printf("%s", STR_STAT_HEADER_TIMESTAMP);
+	if ( !flag_tick )
+	{
+		printf(" %s", STR_STAT_HEADER);
+		if ( flag_wide ) printf(" %s", STR_STAT_HEADER_WIDE);
+	}
+	else
+	{
+		printf(" %s", STR_STAT_HEADER_TICK);
+	}
+	printf("\n");
 	return;
 }
 
@@ -147,8 +211,6 @@ void monitor_each_cpu(void)
 
 	for(b = cpumask ; b!=0 ; b>>=1, maxbit++);
 
-	if ( !flag_accumulation ) printf("cpu# ");
-	printf("%s\n", STAT_HEADER);
 	for(;;)
 	{
 		fp = fopen("/proc/stat", "r" );
@@ -214,7 +276,6 @@ void monitor(void)
 	struct cpu_stat cpu;
 	int n;
 
-	printf("%s\n", STAT_HEADER);
 	for(;;)
 	{
 		fp = fopen("/proc/stat", "r" );
@@ -247,6 +308,7 @@ int main(int argc, char * const argv[])
 	parse_opt(argc, argv);
 	if( cpumask ) printf("cpumask = %llx\n", cpumask);
 	printf("delay = %ld.%09ld sec\n", (long)nanosleep_ts.tv_sec, nanosleep_ts.tv_nsec);
+	show_header();
 	if( cpumask ) {
 		monitor_each_cpu();
 	} else {
