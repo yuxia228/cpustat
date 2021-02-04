@@ -10,6 +10,9 @@ unsigned long long cpumask = 0;
 int flag_accumulation = 0;
 int flag_tick = 0;
 int flag_wide = 0;
+int flag_period = 0;
+unsigned int period_sec = 0;
+double delay_sec = 0.0;
 
 struct cpu_stat {
 	unsigned long user;
@@ -40,6 +43,7 @@ void usage(int argc, char * const argv[])
 	fprintf(stderr, "  -a, --accumulation   accumulate each cpus if cpu-mask is specified\n");
 	fprintf(stderr, "  -w, --wide           show cpu rate of iowait, irq and softirq\n");
 	fprintf(stderr, "  -t, --tick           show tick instead of cpu rate\n");
+	fprintf(stderr, "  -p, --period=SEC     measurement time\n");
 	fprintf(stderr, "  -h, --help           display this help\n");
 	exit(-1);
 }
@@ -59,10 +63,11 @@ int parse_opt(int argc, char * const argv[])
 			{"wide",	no_argument,	   0,  'w' },
 			{"tick",	no_argument,	   0,  't' },
 			{"help",	no_argument,	   0,  'h' },
+			{"period",	no_argument,	   0,  'p' },
 			{0,			0,				   0,  0 }
 		};
 
-		c = getopt_long(argc, argv, "c:d:awth",
+		c = getopt_long(argc, argv, "c:d:awtp:h",
 				 long_options, &option_index);
 		if (c == -1)
 			break;
@@ -83,6 +88,7 @@ int parse_opt(int argc, char * const argv[])
 			nanosleep_ts.tv_sec = (time_t)strtoul(optarg,&endptr,10);
 			if( endptr )
 			{
+				delay_sec = strtod(endptr, NULL);
 				nsec = (long)(1000*1000*1000*strtod(endptr, NULL));
 				if( nsec > 999999999 ) nsec = 999999999;
 				nanosleep_ts.tv_nsec = nsec;
@@ -93,6 +99,10 @@ int parse_opt(int argc, char * const argv[])
 			break;
 		case 't':
 			flag_tick = 1;
+			break;
+		case 'p':
+			flag_period = 1;
+			sscanf(optarg, "%u", &period_sec);
 			break;
 		case 'h':
 		case '?':
@@ -208,6 +218,8 @@ void monitor_each_cpu(void)
 	unsigned int maxbit=0;
 	unsigned long long b, cpuno;
 	char buf[1024];
+	unsigned int loop_count = 0;
+	unsigned int max_loop_count = period_sec * (unsigned int)(1.0/delay_sec);
 
 	for(b = cpumask ; b!=0 ; b>>=1, maxbit++);
 
@@ -267,6 +279,12 @@ void monitor_each_cpu(void)
 		}
 		fflush(stdout);
 		nanosleep(&nanosleep_ts, NULL);
+
+		if (flag_period) {
+			loop_count++;
+			if (loop_count == max_loop_count)
+				break;
+		}
 	}
 }
 
@@ -275,6 +293,8 @@ void monitor(void)
 	FILE *fp;
 	struct cpu_stat cpu;
 	int n;
+	unsigned int loop_count = 0;
+	unsigned int max_loop_count = period_sec * (unsigned int)(1.0/delay_sec);
 
 	for(;;)
 	{
@@ -300,6 +320,12 @@ void monitor(void)
 		last_cpu_stat = cpu;
 		fflush(stdout);
 		nanosleep(&nanosleep_ts, NULL);
+
+		if (flag_period) {
+			loop_count++;
+			if (loop_count == max_loop_count)
+				break;
+		}
 	}
 }
 
