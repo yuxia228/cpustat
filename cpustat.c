@@ -12,7 +12,7 @@ int flag_tick = 0;
 int flag_wide = 0;
 int flag_period = 0;
 unsigned int period_sec = 0;
-double delay_sec = 0.0;
+double delay_sec = 1.0;
 
 struct cpu_stat {
 	unsigned long user;
@@ -93,6 +93,7 @@ int parse_opt(int argc, char * const argv[])
 				if( nsec > 999999999 ) nsec = 999999999;
 				nanosleep_ts.tv_nsec = nsec;
 			}
+			sscanf(optarg, "%lf", &delay_sec);
 			break;
 		case 'w':
 			flag_wide = 1;
@@ -282,7 +283,7 @@ void monitor_each_cpu(void)
 
 		if (flag_period) {
 			loop_count++;
-			if (loop_count == max_loop_count)
+			if (loop_count >= max_loop_count)
 				break;
 		}
 	}
@@ -323,7 +324,7 @@ void monitor(void)
 
 		if (flag_period) {
 			loop_count++;
-			if (loop_count == max_loop_count)
+			if (loop_count >= max_loop_count)
 				break;
 		}
 	}
