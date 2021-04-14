@@ -1,0 +1,8 @@
+
+export NDK=/usr/local/android-ndk-r15c
+export NDK_TOOLCHAIN=$NDK/toolchains/arm-linux-androideabi-4.9/prebuilt/linux-x86_64/bin/arm-linux-androideabi-
+export NDK_SYSROOT=$NDK/platforms/android-24/arch-arm
+export ISYSROOT=$NDK/sysroot
+
+make WERROR=0 ARCH=arm CROSS_COMPILE=${NDK_TOOLCHAIN} EXTRA_CFLAGS="-pie --sysroot=${NDK_SYSROOT}" ISYSROOT=${ISYSROOT}
+
